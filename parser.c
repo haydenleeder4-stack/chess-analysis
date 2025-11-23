@@ -68,6 +68,30 @@ bool parse_move(struct chess_move *move)
         if (next_c >= '1' && next_c <= '8') {
             move->target_square_y = next_c - '1';
 
+        //check if en passant
+        if (moving_piece->piece_type == PIECE_PAWN &&
+            move->target_square_x == board->en_passant_x &&
+            move->target_square_y == board->en_passant_y &&
+            board->en_passant_available) {
+
+            move->en_passant = 1;
+            move->capture = 1; 
+        }
+
+        if (moving_piece->type == PAWN &&
+            abs(move->target_square_y - move->source_y) == 2) {
+
+            board->en_passant_available = 1;
+
+    
+            board->en_passant_x = move->source_x;
+            board->en_passant_y = (move->source_y + move->target_square_y) / 2;
+            }
+        else {
+                board->en_passant_available = 0; // Clear EP if move wasn't a 2-step pawn move
+            }
+
+
             //chekcs if = sign is present idicating promotion
             char promo = getc(stdin);
             if (promo == '=') {
