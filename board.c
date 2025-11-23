@@ -817,6 +817,19 @@ void board_apply_move(struct chess_board *board, const struct chess_move *move) 
             board->board_array[y][3] = board->board_array[y][0];
             board->board_array[y][0].piece_type = PIECE_EMPTY;
         }
+        //Include en passant move
+    if (move->en_passant) {
+        int captured_pawn_y;
+
+        if (moving_piece.colour == PLAYER_WHITE) {
+            captured_pawn_y = move->target_square_y + 1;
+        }
+        else {
+            captured_pawn_y = move->target_square_y - 1;
+        }
+
+        // remove the pawn that is passed over
+        board->board_array[captured_pawn_y][move->target_square_x].piece_type = PIECE_EMPTY;
     }
     //move piece to another square while replacing the source square with an empty space
     board->board_array[move->target_square_y][move->target_square_x] = move->moving_piece;
