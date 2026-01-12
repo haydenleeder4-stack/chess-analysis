@@ -4,6 +4,7 @@
 #include <stdio.h>
 
 #include "panic.h"
+#include <stdlib.h>
 
 const char *player_string(enum chess_player player) {
     switch (player) {
@@ -13,25 +14,6 @@ const char *player_string(enum chess_player player) {
             return "black";
     }
 }
-
-// Helper: check clear path for a rook (no pieces between (sx,sy) and (tx,ty))
-static bool rook_path_clear(const struct chess_board *board, int sx, int sy, int tx, int ty) {
-    if (sx == tx) {
-        int dy = (ty > sy) ? 1 : -1;
-        for (int y = sy + dy; y != ty; y += dy) {
-            if (board->board_array[y][sx].piece_type != PIECE_EMPTY) return false;
-        }
-        return true;
-    } else if (sy == ty) {
-        int dx = (tx > sx) ? 1 : -1;
-        for (int x = sx + dx; x != tx; x += dx) {
-            if (board->board_array[sy][x].piece_type != PIECE_EMPTY) return false;
-        }
-        return true;
-    }
-    return false; // not a straight move
-}
-
 
 
 const char *piece_string(enum piece_type piece) {
@@ -56,6 +38,7 @@ struct chess_piece empty_piece = {
     .colour = PLAYER_EMPTY,
 };
 
+//intializes board with propper piece order as well as empty squares
 void board_initialize(struct chess_board *board) {
     board->next_move_player = PLAYER_WHITE;
 
@@ -115,6 +98,9 @@ void board_initialize(struct chess_board *board) {
     board->board_array[7][7].colour = PLAYER_BLACK;
 }
 
+
+// fills out necessary fields of the given move struct so the apply move function will know exactly which piece is
+//moving and if it is actually legal
 void board_complete_move(const struct chess_board *board, struct chess_move *move) {
     const struct chess_piece target = board->board_array[move->target_square_y][move->target_square_x];
 
@@ -127,9 +113,11 @@ void board_complete_move(const struct chess_board *board, struct chess_move *mov
                move->target_square_y + 1);
     }
 
-    // --- Pawn moves ---
+    // Pawn moves
     if (move->piece_type == PIECE_PAWN) {
         if (move->capture) {
+
+            // throws error if there isn't a pawn to capture
             if (target.piece_type == PIECE_EMPTY) {
                 panicf("move completion error: %s %s to %c%d (capture on empty square)",
                        player_string(board->next_move_player),
@@ -138,9 +126,12 @@ void board_complete_move(const struct chess_board *board, struct chess_move *mov
                        move->target_square_y + 1);
             }
 
+            // candidates array stores the file of a pawn that is available to make the move and the count variable
+            //keeps track of how many candidates have been found
             int candidates[2] = {-1, -1};
             int count = 0;
 
+            // finds candidates based on which colour is capturing
             if (board->next_move_player == PLAYER_WHITE) {
                 if (move->target_square_x > 0 &&
                     board->board_array[move->target_square_y - 1][move->target_square_x - 1].piece_type == PIECE_PAWN &&
@@ -165,47 +156,63 @@ void board_complete_move(const struct chess_board *board, struct chess_move *mov
                 }
             }
 
+            //throws error if there are no pawns that can preform the capture
             if (count == 0) {
                 panicf("move completion error: %s %s to %c%d (no pawn can capture)",
                        player_string(board->next_move_player),
                        piece_string(move->piece_type),
                        'a' + move->target_square_x,
                        move->target_square_y + 1);
-            } else if (count > 1 && move->source_x == -1) {
+            }
+
+            // throws error if 2 pawns can capture and the origin file wasn't specified
+            else if (count > 1 && move->source_x == -1) {
                 panicf("move completion error: %s %s to %c%d (ambiguous capture, source file not specified)",
                        player_string(board->next_move_player),
                        piece_string(move->piece_type),
                        'a' + move->target_square_x,
                        move->target_square_y + 1);
-            } else {
-                int src_file = (count == 1) ? candidates[0] : move->source_x;
-                int src_rank = (board->next_move_player == PLAYER_WHITE)
-                                   ? move->target_square_y - 1
-                                   : move->target_square_y + 1;
+            }
 
+            // fills out source_x and source_y
+            else {
+                int src_file = (count == 1) ? candidates[0] : move->source_x;
+                int src_rank = (board->next_move_player == PLAYER_WHITE) ? move->target_square_y - 1: move->target_square_y + 1;
                 move->source_x = src_file;
                 move->source_y = src_rank;
                 move->moving_piece = board->board_array[src_rank][src_file];
             }
-        } else {
+        }
+
+        // if move isn't a capture
+        else {
             if (board->next_move_player == PLAYER_WHITE) {
+                // checks below target square to ensure a movable pawn is there
                 if (board->board_array[move->target_square_y - 1][move->target_square_x].piece_type == PIECE_PAWN &&
                     board->board_array[move->target_square_y - 1][move->target_square_x].colour == PLAYER_WHITE) {
                     move->source_x = move->target_square_x;
                     move->source_y = move->target_square_y - 1;
                     move->moving_piece = board->board_array[move->source_y][move->source_x];
-                } else if (move->target_square_y == 3 &&
+                    }
+                //checks case that pawn moves 2 squares to the 4th row from it's starting position
+                else if (move->target_square_y == 3 &&
                            board->board_array[2][move->target_square_x].piece_type == PIECE_EMPTY &&
                            board->board_array[1][move->target_square_x].piece_type == PIECE_PAWN &&
                            board->board_array[1][move->target_square_x].colour == PLAYER_WHITE) {
                     move->source_x = move->target_square_x;
                     move->source_y = 1;
                     move->moving_piece = board->board_array[move->source_y][move->source_x];
-                } else {
+                           }
+
+                else {
                     panicf("move completion error: WHITE PAWN to %c%d (no pawn can move)",
                            'a' + move->target_square_x, move->target_square_y + 1);
                 }
-            } else {
+            }
+
+            // standard pawn move for black pawns
+            // same code as white pawns just scanning in the opposite direction
+            else {
                 if (board->board_array[move->target_square_y + 1][move->target_square_x].piece_type == PIECE_PAWN &&
                     board->board_array[move->target_square_y + 1][move->target_square_x].colour == PLAYER_BLACK) {
                     move->source_x = move->target_square_x;
@@ -226,132 +233,180 @@ void board_complete_move(const struct chess_board *board, struct chess_move *mov
         }
     }
 
-    // Helper: check clear path for a rook (no pieces between (sx,sy) and (tx,ty))
 
+//
 else if (move->piece_type == PIECE_ROOK) {
-    int tx = move->target_square_x;
-    int ty = move->target_square_y;
-    int src_x = -1, src_y = -1;
-
-    // Target must be empty or opponent piece (basic legality)
-    struct chess_piece tgt = board->board_array[ty][tx];
-    if (tgt.piece_type != PIECE_EMPTY && tgt.colour == board->next_move_player) {
+     //target square must be empty or contain opponent piece
+    struct chess_piece target_piece = board->board_array[move->target_square_y][move->target_square_x];
+    if (target_piece.piece_type != PIECE_EMPTY && target_piece.colour == board->next_move_player) {
         panicf("illegal move: %s rook to %c%d (own piece on target)",
-               player_string(board->next_move_player), 'a' + tx, ty + 1);
+               player_string(board->next_move_player),
+               'a' + move->target_square_x, move->target_square_y + 1);
     }
 
-    // --- Disambiguation by file (e.g. Rfe1, Rcc1) ---
+    bool rook_found = false;
+
+    // If source file is given, scan that file for a rook of the correct colour
     if (move->source_x != -1 && move->source_y == -1) {
-        int sx = move->source_x;
-        for (int y = 0; y < 8; y++) {
-            struct chess_piece p = board->board_array[y][sx];
-            if (p.piece_type == PIECE_ROOK && p.colour == board->next_move_player) {
-                bool clear = false;
+        for (int row = 0; row < 8 && !rook_found; row++) {
+            struct chess_piece candidate = board->board_array[row][move->source_x];
+            if (candidate.piece_type == PIECE_ROOK && candidate.colour == board->next_move_player) {
+                bool path_clear = false;
 
-                if (sx == tx) {
+                if (move->source_x == move->target_square_x) {
                     // Vertical move on same file
-                    int dy = (ty > y) ? 1 : -1;
-                    clear = true;
-                    for (int yy = y + dy; yy != ty; yy += dy) {
-                        if (board->board_array[yy][sx].piece_type != PIECE_EMPTY) { clear = false; break; }
+                    int step = (move->target_square_y > row) ? 1 : -1;
+                    path_clear = true;
+                    // ensures the path is clear from the rook that was found to the target square
+                    for (int check_row = row + step; check_row != move->target_square_y; check_row += step) {
+                        if (board->board_array[check_row][move->source_x].piece_type != PIECE_EMPTY) {
+                            path_clear = false; break;
+                        }
                     }
-                } else if (y == ty) {
-                    // Horizontal move on same rank (this fixes Rfe1)
-                    int dx = (tx > sx) ? 1 : -1;
-                    clear = true;
-                    for (int xx = sx + dx; xx != tx; xx += dx) {
-                        if (board->board_array[ty][xx].piece_type != PIECE_EMPTY) { clear = false; break; }
-                    }
-                }
-
-                if (clear) { src_x = sx; src_y = y; break; }
-            }
-        }
-    }
-
-    // --- Disambiguation by rank (e.g. R2e2) ---
-    else if (move->source_y != -1 && move->source_x == -1) {
-        int sy = move->source_y;
-        for (int x = 0; x < 8; x++) {
-            struct chess_piece p = board->board_array[sy][x];
-            if (p.piece_type == PIECE_ROOK && p.colour == board->next_move_player) {
-                bool clear = false;
-
-                if (sy == ty) {
+                } else if (row == move->target_square_y) {
                     // Horizontal move on same rank
-                    int dx = (tx > x) ? 1 : -1;
-                    clear = true;
-                    for (int xx = x + dx; xx != tx; xx += dx) {
-                        if (board->board_array[sy][xx].piece_type != PIECE_EMPTY) { clear = false; break; }
-                    }
-                } else if (x == tx) {
-                    // Vertical move on same file
-                    int dy = (ty > sy) ? 1 : -1;
-                    clear = true;
-                    for (int yy = sy + dy; yy != ty; yy += dy) {
-                        if (board->board_array[yy][tx].piece_type != PIECE_EMPTY) { clear = false; break; }
+                    int step = (move->target_square_x > move->source_x) ? 1 : -1;
+                    path_clear = true;
+                    // ensures the path is clear from the rook that was found to the target square
+                    for (int check_col = move->source_x + step; check_col != move->target_square_x; check_col += step) {
+                        if (board->board_array[move->target_square_y][check_col].piece_type != PIECE_EMPTY) {
+                            path_clear = false; break;
+                        }
                     }
                 }
 
-                if (clear) { src_x = x; src_y = sy; break; }
+                if (path_clear) {
+                    move->source_y = row;
+                    move->moving_piece = candidate;
+                    rook_found = true;
+                }
             }
         }
     }
 
-    // --- No disambiguation: scan outward with clearance checks ---
+    // if source rank was given
+    // similar function to when the file is given
+    else if (move->source_y != -1 && move->source_x == -1) {
+        for (int col = 0; col < 8 && !rook_found; col++) {
+            struct chess_piece candidate = board->board_array[move->source_y][col];
+            if (candidate.piece_type == PIECE_ROOK && candidate.colour == board->next_move_player) {
+                bool path_clear = false;
+
+                if (move->source_y == move->target_square_y) {
+                    // Horizontal move on same rank
+                    int step = (move->target_square_x > col) ? 1 : -1;
+                    path_clear = true;
+                    for (int check_col = col + step; check_col != move->target_square_x; check_col += step) {
+                        if (board->board_array[move->source_y][check_col].piece_type != PIECE_EMPTY) {
+                            path_clear = false; break;
+                        }
+                    }
+                } else if (col == move->target_square_x) {
+                    // Vertical move on same file
+                    int step = (move->target_square_y > move->source_y) ? 1 : -1;
+                    path_clear = true;
+                    for (int check_row = move->source_y + step; check_row != move->target_square_y; check_row += step) {
+                        if (board->board_array[check_row][move->target_square_x].piece_type != PIECE_EMPTY) {
+                            path_clear = false; break;
+                        }
+                    }
+                }
+
+                if (path_clear) {
+                    move->source_x = col;
+                    move->moving_piece = candidate;
+                    rook_found = true;
+                }
+            }
+        }
+    }
+
+    //If no source is given at all
+    // Scan outward from the target square in all four directions until a rook is found
     else {
         // Scan left
-        for (int x = tx - 1; x >= 0 && src_x == -1; x--) {
-            struct chess_piece p = board->board_array[ty][x];
-            if (p.piece_type != PIECE_EMPTY) {
-                if (p.piece_type == PIECE_ROOK && p.colour == board->next_move_player) {
-                    bool clear = true;
-                    for (int xx = x + 1; xx < tx; xx++) {
-                        if (board->board_array[ty][xx].piece_type != PIECE_EMPTY) { clear = false; break; }
+        for (int col = move->target_square_x - 1; col >= 0 && !rook_found; col--) {
+            struct chess_piece candidate = board->board_array[move->target_square_y][col];
+            if (candidate.piece_type != PIECE_EMPTY) {
+                if (candidate.piece_type == PIECE_ROOK && candidate.colour == board->next_move_player) {
+                    bool path_clear = true;
+                    for (int check_col = col + 1; check_col < move->target_square_x; check_col++) {
+                        if (board->board_array[move->target_square_y][check_col].piece_type != PIECE_EMPTY) {
+                            path_clear = false; break;
+                        }
                     }
-                    if (clear) { src_x = x; src_y = ty; }
+                    if (path_clear) {
+                        move->source_x = col;
+                        move->source_y = move->target_square_y;
+                        move->moving_piece = candidate;
+                        rook_found = true;
+                    }
                 }
-                break;
+                break; // stop scanning once a piece is encountered
             }
         }
+
         // Scan right
-        for (int x = tx + 1; x < 8 && src_x == -1; x++) {
-            struct chess_piece p = board->board_array[ty][x];
-            if (p.piece_type != PIECE_EMPTY) {
-                if (p.piece_type == PIECE_ROOK && p.colour == board->next_move_player) {
-                    bool clear = true;
-                    for (int xx = x - 1; xx > tx; xx--) {
-                        if (board->board_array[ty][xx].piece_type != PIECE_EMPTY) { clear = false; break; }
+        for (int col = move->target_square_x + 1; col < 8 && !rook_found; col++) {
+            struct chess_piece candidate = board->board_array[move->target_square_y][col];
+            if (candidate.piece_type != PIECE_EMPTY) {
+                if (candidate.piece_type == PIECE_ROOK && candidate.colour == board->next_move_player) {
+                    bool path_clear = true;
+                    for (int check_col = col - 1; check_col > move->target_square_x; check_col--) {
+                        if (board->board_array[move->target_square_y][check_col].piece_type != PIECE_EMPTY) {
+                            path_clear = false; break;
+                        }
                     }
-                    if (clear) { src_x = x; src_y = ty; }
+                    if (path_clear) {
+                        move->source_x = col;
+                        move->source_y = move->target_square_y;
+                        move->moving_piece = candidate;
+                        rook_found = true;
+                    }
                 }
                 break;
             }
         }
-        // Scan down
-        for (int y = ty - 1; y >= 0 && src_x == -1; y--) {
-            struct chess_piece p = board->board_array[y][tx];
-            if (p.piece_type != PIECE_EMPTY) {
-                if (p.piece_type == PIECE_ROOK && p.colour == board->next_move_player) {
-                    bool clear = true;
-                    for (int yy = y + 1; yy < ty; yy++) {
-                        if (board->board_array[yy][tx].piece_type != PIECE_EMPTY) { clear = false; break; }
+
+        // Scan downward
+        for (int row = move->target_square_y - 1; row >= 0 && !rook_found; row--) {
+            struct chess_piece candidate = board->board_array[row][move->target_square_x];
+            if (candidate.piece_type != PIECE_EMPTY) {
+                if (candidate.piece_type == PIECE_ROOK && candidate.colour == board->next_move_player) {
+                    bool path_clear = true;
+                    for (int check_row = row + 1; check_row < move->target_square_y; check_row++) {
+                        if (board->board_array[check_row][move->target_square_x].piece_type != PIECE_EMPTY) {
+                            path_clear = false; break;
+                        }
                     }
-                    if (clear) { src_x = tx; src_y = y; }
+                    if (path_clear) {
+                        move->source_x = move->target_square_x;
+                        move->source_y = row;
+                        move->moving_piece = candidate;
+                        rook_found = true;
+                    }
                 }
                 break;
             }
         }
-        // Scan up
-        for (int y = ty + 1; y < 8 && src_x == -1; y++) {
-            struct chess_piece p = board->board_array[y][tx];
-            if (p.piece_type != PIECE_EMPTY) {
-                if (p.piece_type == PIECE_ROOK && p.colour == board->next_move_player) {
-                    bool clear = true;
-                    for (int yy = y - 1; yy > ty; yy--) {
-                        if (board->board_array[yy][tx].piece_type != PIECE_EMPTY) { clear = false; break; }
+
+        // Scan upward
+        for (int row = move->target_square_y + 1; row < 8 && !rook_found; row++) {
+            struct chess_piece candidate = board->board_array[row][move->target_square_x];
+            if (candidate.piece_type != PIECE_EMPTY) {
+                if (candidate.piece_type == PIECE_ROOK && candidate.colour == board->next_move_player) {
+                    bool path_clear = true;
+                    for (int check_row = row - 1; check_row > move->target_square_y; check_row--) {
+                        if (board->board_array[check_row][move->target_square_x].piece_type != PIECE_EMPTY) {
+                            path_clear = false; break;
+                        }
                     }
-                    if (clear) { src_x = tx; src_y = y; }
+                    if (path_clear) {
+                        move->source_x = move->target_square_x;
+                        move->source_y = row;
+                        move->moving_piece = candidate;
+                        rook_found = true;
+                    }
                 }
                 break;
             }
@@ -359,13 +414,10 @@ else if (move->piece_type == PIECE_ROOK) {
     }
 
     // --- Finalize ---
-    if (src_x == -1) {
+    if (!rook_found) {
         panicf("move completion error: %s rook to %c%d (no rook can move)",
-               player_string(board->next_move_player), 'a' + tx, ty + 1);
-    } else {
-        move->source_x = src_x;
-        move->source_y = src_y;
-        move->moving_piece = board->board_array[src_y][src_x];
+               player_string(board->next_move_player),
+               'a' + move->target_square_x, move->target_square_y + 1);
     }
 }
 
@@ -818,6 +870,18 @@ void board_apply_move(struct chess_board *board, const struct chess_move *move) 
             board->board_array[y][0].piece_type = PIECE_EMPTY;
         }
     }
+
+    if (move->piece_type == PIECE_PAWN &&
+        abs(move->target_square_y - move->source_y) == 2)
+    {
+        board->en_passant_available = 1;
+        board->en_passant_x = move->source_x;
+        board->en_passant_y =
+            (move->source_y + move->target_square_y) / 2;
+    }
+    else {
+        board->en_passant_available = 0;
+    }
     //move piece to another square while replacing the source square with an empty space
     board->board_array[move->target_square_y][move->target_square_x] = move->moving_piece;
     board->board_array[move->source_y][move->source_x] = empty_piece;
@@ -834,31 +898,125 @@ void board_apply_move(struct chess_board *board, const struct chess_move *move) 
     board_draw(board);
 }
 
+// TODO: print the state of the game.
+//helper: check if coordinates are valid
+bool is_valid_pos(int x, int y) {
+    return x >= 0 && x < 8 && y >= 0 && y < 8;
+}
 
-//helper funct
+//core logic: check if the current player's king is under attack
+bool is_in_check(const struct chess_board *board, enum chess_player player) {
+    int kx = -1, ky = -1;
+
+    //1.find the king
+    for (int y = 0; y < 8; y++) {
+        for (int x = 0; x < 8; x++) {
+            if (board->board_array[y][x].piece_type == PIECE_KING &&
+                board->board_array[y][x].colour == player) {
+                kx = x;
+                ky = y;
+                break;
+            }
+        }
+        if (kx != -1) break;
+    }
+
+    if (kx == -1) return false;
+
+    enum chess_player enemy = (player == PLAYER_WHITE) ? PLAYER_BLACK : PLAYER_WHITE;
+
+    //2.check straight lines (rook/queen)
+    int dirs_straight[4][2] = {{0, 1}, {0, -1}, {1, 0}, {-1, 0}};
+    for (int i = 0; i < 4; i++) {
+        for (int dist = 1; dist < 8; dist++) {
+            int nx = kx + dirs_straight[i][0] * dist;
+            int ny = ky + dirs_straight[i][1] * dist;
+            
+            if (!is_valid_pos(nx, ny)) break;
+
+            struct chess_piece p = board->board_array[ny][nx];
+            if (p.piece_type == PIECE_EMPTY) continue;
+            
+            if (p.colour == player) break; //blocked by own piece
+            if (p.colour == enemy) {
+                if (p.piece_type == PIECE_ROOK || p.piece_type == PIECE_QUEEN) return true;
+                break; //blocked by non-attacking enemy
+            }
+        }
+    }
+
+    //3.check diagonals (bishop/queen)
+    int dirs_diag[4][2] = {{1, 1}, {1, -1}, {-1, 1}, {-1, -1}};
+    for (int i = 0; i < 4; i++) {
+        for (int dist = 1; dist < 8; dist++) {
+            int nx = kx + dirs_diag[i][0] * dist;
+            int ny = ky + dirs_diag[i][1] * dist;
+            
+            if (!is_valid_pos(nx, ny)) break;
+
+            struct chess_piece p = board->board_array[ny][nx];
+            if (p.piece_type == PIECE_EMPTY) continue;
+            
+            if (p.colour == player) break;
+            if (p.colour == enemy) {
+                if (p.piece_type == PIECE_BISHOP || p.piece_type == PIECE_QUEEN) return true;
+                break;
+            }
+        }
+    }
+
+    //4.check knights
+    int knight_moves[8][2] = {{1, 2}, {1, -2}, {-1, 2}, {-1, -2}, 
+                              {2, 1}, {2, -1}, {-2, 1}, {-2, -1}};
+    for (int i = 0; i < 8; i++) {
+        int nx = kx + knight_moves[i][0];
+        int ny = ky + knight_moves[i][1];
+        if (is_valid_pos(nx, ny)) {
+            struct chess_piece p = board->board_array[ny][nx];
+            if (p.colour == enemy && p.piece_type == PIECE_KNIGHT) return true;
+        }
+    }
+
+    //5.check pawns
+    int p_dir = (enemy == PLAYER_WHITE) ? -1 : 1; 
+    int p_cols[2] = {-1, 1};
+    for (int i = 0; i < 2; i++) {
+        int nx = kx + p_cols[i];
+        int ny = ky + p_dir;
+        if (is_valid_pos(nx, ny)) {
+            struct chess_piece p = board->board_array[ny][nx];
+            if (p.colour == enemy && p.piece_type == PIECE_PAWN) return true;
+        }
+    }
+
+    return false;
+}
+
+//helper:check if player has any legal moves (placeholder)
+bool has_legal_moves(const struct chess_board *board, enum chess_player player) {
+    return true;
+}
+
 void board_summarize(const struct chess_board *board) {
-    // TODO: print the state of the game.
     //determine whose turn it is
     enum chess_player current_player = board->next_move_player;
-    //is the current player's king under attack?
-    bool in_check = false;
-    //Does the current player have any legal moves left?
-    bool can_move = true;
+    
+    //check game status
+    bool in_check = is_in_check(board, current_player);
+    bool can_move = false;//has_legal_moves(board, current_player);
+
     if (can_move) {
         printf("game incomplete\n");
     } else {
-        //the player has no legal moves，we need to check if it's checkmate or stalemate
-
         if (in_check) {
             if (current_player == PLAYER_WHITE)
-                printf("black wins by checkmate\n");
+                printf("White wins by checkmate\n");
             else
-                printf("white wins by checkmate\n");
+                printf("Black wins by checkmate\n");
         } else {
             printf("draw by stalemate\n");
         }
     }
 }
-
 
 //d4 Nf6 Bf4 g6 e3 Bg7 Bd3 d5 Nd2 c6 c3 Qb6 Qb3 Nbd7 Ngf3 Nh5 Qxb6 axb6 h3 Nxf4 exf4 Nf6 a3 O-O O-O Nh5 g3 Bxh3 Rfe1 e6 c4 Bg4 cxd5 exd5 Ne5 Bxe5 dxe5 c5 f3 Bd7 g4 Nxf4 Bc2 Bb5 Nb1 Rfe8 Nc3 Ba6 Ba4 Re7 Rad1 d4 Ne4 Kg7 Nd6 Nd3 Re2 Nxe5 Rf2 Nd3 Rg2 Nf4 Rh2 Ne2 Kg2 Nf4 Kg3 Nd5 Rdh1 Rh8 Bc2 Ne3 Kf4 Nxc2 Rxc2 Re2 Rcc1 Rxb2 Ne4 Rd8 Ng3 d3 Ne4 d2 Rcd1 Rd4 Ke5 Be2 Rxh7 Kxh7 Ng5 Kg7 Rh1 f6 Ke6 fxg5 a4 Bxf3 Rg1 d1=Q Rxd1 Rxd1 a5 Re2
